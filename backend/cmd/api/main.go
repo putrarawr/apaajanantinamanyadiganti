@@ -40,6 +40,11 @@ func main() {
 		log.Println("[INFO] Server will continue without active database connection.")
 	} else {
 		defer pool.Close()
+
+		// Run pending database migrations
+		if err := database.RunMigrations(context.Background(), pool); err != nil {
+			log.Fatalf("Database migration failed: %v\n", err)
+		}
 	}
 
 	// 3. Start HTTP Server
