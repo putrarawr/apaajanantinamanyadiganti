@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@next/swc-linux-x64-gnu':
-        specifier: ^16.4.6
-        version: 16.4.6
       next:
         specifier: 16.4.6
         version: 16.4.6(@babel/core@7.29.13(supports-color@7.2.0))(@types/node@20.19.43)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -2306,7 +2303,8 @@ snapshots:
   '@next/swc-linux-arm64-musl@16.4.6':
     optional: true
 
-  '@next/swc-linux-x64-gnu@16.4.6': {}
+  '@next/swc-linux-x64-gnu@16.4.6':
+    optional: true
 
   '@next/swc-linux-x64-musl@16.4.6':
     optional: true

@@ -52,9 +52,16 @@ go run cmd/api/main.go
 ```
 - Backend berjalan di: `http://localhost:8080`
 - Otomatis membaca konfigurasi dari `backend/.env` (atau fallback ke default Docker port `5433`).
-- **Endpoint Test:**
+- **Endpoint API:**
   - `GET /api/health` — Status API & koneksi PostgreSQL (`db_status: "connected"`).
   - `GET /api/products` — Data mock produk UMKM.
+  - `POST /api/auth/register` — Registrasi akun (role: `buyer` atau `seller`).
+  - `POST /api/auth/login` — Login akun (`buyer`, `seller`, `admin`).
+
+> **Akun Admin Bawaan (Default Seeder):**
+> - Email: `admin@umkm.local`
+> - Password: `AdminPassword123!`
+> - Admin tidak bisa mendaftar lewat endpoint registrasi publik, hanya bisa melalui login.
 
 **Menjalankan Unit Test Backend:**
 ```bash

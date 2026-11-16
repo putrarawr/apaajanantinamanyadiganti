@@ -45,6 +45,11 @@ func main() {
 		if err := database.RunMigrations(context.Background(), pool); err != nil {
 			log.Fatalf("Database migration failed: %v\n", err)
 		}
+
+		// Seed initial admin if none exists
+		if err := database.SeedDefaultAdmin(context.Background(), pool); err != nil {
+			log.Printf("[WARNING] Admin seeder failed: %v\n", err)
+		}
 	}
 
 	// 3. Start HTTP Server

@@ -10,7 +10,14 @@ import (
 func NewRouter(db *pgxpool.Pool) http.Handler {
 	server := &Server{DB: db}
 	mux := http.NewServeMux()
+
+	// Health and Mock Catalog
 	mux.HandleFunc("/api/health", server.HealthHandler)
 	mux.HandleFunc("/api/products", server.ProductsHandler)
+
+	// Auth Endpoints (Login, Register)
+	mux.HandleFunc("/api/auth/register", server.RegisterHandler)
+	mux.HandleFunc("/api/auth/login", server.LoginHandler)
+
 	return CORSMiddleware(mux)
 }
