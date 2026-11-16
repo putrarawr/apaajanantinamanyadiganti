@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { getApiBaseUrl } from "@/lib/api";
 
 interface User {
   id: string;
@@ -30,7 +31,7 @@ export default function LoginPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentStore, setCurrentStore] = useState<Store | null>(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
+  const apiUrl = getApiBaseUrl();
 
   useEffect(() => {
     const savedUser = localStorage.getItem("auth_user");

@@ -14,8 +14,8 @@ import (
 )
 
 func main() {
-	// 1. Load .env file if available
-	_ = godotenv.Load()
+	// 1. Load .env file if available (checks current dir, backend/, or parent)
+	_ = godotenv.Load(".env", "backend/.env", "../.env")
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -37,6 +37,7 @@ func main() {
 	pool, err = database.Connect(ctx, databaseURL)
 	if err != nil {
 		log.Printf("[WARNING] Could not connect to PostgreSQL: %v\n", err)
+		log.Printf("[HINT] Pastikan PostgreSQL menyala di %s. Jika dijalankan di laptop teman/anggota tim, ubah 'localhost' di backend/.env menjadi IP laptop host Docker.\n", databaseURL)
 		log.Println("[INFO] Server will continue without active database connection.")
 	} else {
 		defer pool.Close()

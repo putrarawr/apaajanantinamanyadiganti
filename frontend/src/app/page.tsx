@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
+import { getApiBaseUrl } from "@/lib/api";
 
 export interface ProductItem {
   id: string;
@@ -314,7 +315,7 @@ export default function Home() {
     image: "https://images.unsplash.com/photo-1590736969955-71cc94801759?auto=format&fit=crop&w=800&q=80",
   });
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  const apiUrl = getApiBaseUrl();
 
   // Fetch from backend Go API only if NEXT_PUBLIC_API_URL is configured
   useEffect(() => {
