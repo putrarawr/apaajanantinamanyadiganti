@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -136,8 +137,9 @@ func (s *Server) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Email sudah terdaftar"})
 			return
 		}
+		log.Printf("[ERROR] Register user insert failed: %v\n", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Gagal menyimpan data pengguna: " + err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Gagal menyimpan data pengguna"})
 		return
 	}
 
@@ -164,8 +166,9 @@ func (s *Server) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		err = tx.QueryRow(ctx, insertStoreQuery, user.ID, store.Name, store.Description, store.Address, store.IsVerified).
 			Scan(&store.ID, &store.IsVerified)
 		if err != nil {
+			log.Printf("[ERROR] Register store insert failed: %v\n", err)
 			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Gagal membuat profil toko: " + err.Error()})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Gagal membuat profil toko"})
 			return
 		}
 	}
@@ -240,8 +243,9 @@ func (s *Server) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Email atau password salah"})
 			return
 		}
+		log.Printf("[ERROR] Login query failed: %v\n", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Gagal memproses login: " + err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Terjadi kesalahan sistem saat memproses login"})
 		return
 	}
 

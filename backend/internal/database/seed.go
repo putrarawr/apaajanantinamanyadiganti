@@ -46,6 +46,6 @@ func SeedDefaultAdmin(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to seed admin user: %w", err)
 	}
 
-	log.Printf("[SEEDER] Default admin account seeded: %s (password: %s)\n", adminEmail, adminPassword)
+	log.Printf("[SEEDER] Default admin account seeded: %s\n", adminEmail)
 	return nil
 }

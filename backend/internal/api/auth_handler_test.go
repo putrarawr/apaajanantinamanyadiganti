@@ -200,6 +200,57 @@ func TestLoginInvalidCredentials(t *testing.T) {
 	}
 }
 
+func TestRegisterDuplicateEmailReturnsConflict(t *testing.T) {
+	pool := getTestDB(t)
+	defer pool.Close()
+
+	router := api.NewRouter(pool)
+
+	email := fmt.Sprintf("dup_%d@umkm.local", time.Now().UnixNano())
+	payload := map[string]string{
+		"name":     "Pengguna Duplikat",
+		"email":    email,
+		"password": "Password123!",
+		"role":     "buyer",
+	}
+	body, _ := json.Marshal(payload)
+
+	// First registration
+	req1 := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBuffer(body))
+	req1.Header.Set("Content-Type", "application/json")
+	rr1 := httptest.NewRecorder()
+	router.ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusCreated {
+		t.Fatalf("first registration failed: %d", rr1.Code)
+	}
+
+	// Duplicate registration attempt
+	body2, _ := json.Marshal(payload)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBuffer(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	router.ServeHTTP(rr2, req2)
+
+	if rr2.Code != http.StatusConflict {
+		t.Errorf("expected status 409 Conflict for duplicate email, got %d", rr2.Code)
+	}
+
+	// Also test wrong password for registered user
+	wrongLogin := map[string]string{
+		"email":    email,
+		"password": "WrongPasswordEntered!",
+	}
+	wBody, _ := json.Marshal(wrongLogin)
+	wReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBuffer(wBody))
+	wReq.Header.Set("Content-Type", "application/json")
+	wRr := httptest.NewRecorder()
+	router.ServeHTTP(wRr, wReq)
+
+	if wRr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for wrong password on registered user, got %d", wRr.Code)
+	}
+}
+
 func TestAdminLoginSuccess(t *testing.T) {
 	pool := getTestDB(t)
 	defer pool.Close()

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import Link from "next/link";
 
 export interface ProductItem {
   id: string;
@@ -274,6 +275,18 @@ export default function Home() {
   const [selectedProduct, setSelectedProduct] = useState<ProductItem | null>(null);
   const [isSellModalOpen, setIsSellModalOpen] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [authUser, setAuthUser] = useState<{ name: string; role: string } | null>(null);
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem("auth_user");
+    if (savedUser) {
+      try {
+        setAuthUser(JSON.parse(savedUser));
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
@@ -587,18 +600,32 @@ export default function Home() {
 
           {/* Right Menu & CTA */}
           <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-            <button
-              onClick={() => setIsLoginModalOpen(true)}
-              className="hidden sm:inline text-xs sm:text-sm font-medium text-white hover:underline cursor-pointer"
-            >
-              Daftar
-            </button>
-            <button
-              onClick={() => setIsLoginModalOpen(true)}
-              className="hidden sm:inline text-xs sm:text-sm font-medium text-white hover:underline cursor-pointer"
-            >
-              Masuk
-            </button>
+            {authUser ? (
+              <Link
+                href="/auth/login"
+                className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 text-white px-3 py-1 rounded-full text-xs font-semibold transition"
+              >
+                <span>👤 {authUser.name}</span>
+                <span className="uppercase text-[10px] bg-white text-[#FF6801] px-1.5 py-0.5 rounded font-black">
+                  {authUser.role}
+                </span>
+              </Link>
+            ) : (
+              <>
+                <Link
+                  href="/auth/register"
+                  className="hidden sm:inline text-xs sm:text-sm font-medium text-white hover:underline cursor-pointer"
+                >
+                  Daftar
+                </Link>
+                <Link
+                  href="/auth/login"
+                  className="hidden sm:inline text-xs sm:text-sm font-medium text-white hover:underline cursor-pointer"
+                >
+                  Masuk
+                </Link>
+              </>
+            )}
             <button
               onClick={() => setIsSellModalOpen(true)}
               className="flex items-center gap-1 bg-white hover:bg-gray-50 text-[#FF6801] px-3.5 sm:px-4 py-1.5 rounded text-xs sm:text-sm font-bold shadow-sm transition-colors cursor-pointer"
@@ -1378,6 +1405,13 @@ export default function Home() {
             </div>
 
             <div className="space-y-2 pt-2 text-xs">
+              <Link
+                href="/auth"
+                onClick={() => setIsLoginModalOpen(false)}
+                className="w-full py-2.5 px-4 bg-[#FF6801] hover:bg-[#E55D00] text-white rounded font-bold transition-colors block text-center shadow-sm"
+              >
+                🔐 Masuk / Daftar Akun (Testing Backend API)
+              </Link>
               <button
                 onClick={() => {
                   showToast("Berhasil masuk sebagai Pengguna Tamu");
@@ -1385,16 +1419,16 @@ export default function Home() {
                 }}
                 className="w-full py-2.5 px-4 border border-gray-300 rounded font-semibold text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
               >
-                <span>Lanjut dengan Akun Google</span>
+                <span>Lanjut dengan Akun Google (Demo)</span>
               </button>
               <button
                 onClick={() => {
                   showToast("Berhasil masuk melalui WhatsApp");
                   setIsLoginModalOpen(false);
                 }}
-                className="w-full py-2.5 px-4 bg-[#FF6801] hover:bg-[#E55D00] text-white rounded font-bold transition-colors"
+                className="w-full py-2.5 px-4 border border-gray-300 rounded font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
               >
-                Masuk dengan Nomor WhatsApp
+                Masuk dengan Nomor WhatsApp (Demo)
               </button>
             </div>
           </div>
