@@ -1,0 +1,16 @@
+# Dependencies & builds
+node_modules/
+.next/
+out/
+build/
+bin/
+
+# Environment variables
+.env*.local
+
+# Superpowers scratch
+.superpowers/
+
+# OS files
+.DS_Store
+Thumbs.db
