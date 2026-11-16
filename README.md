@@ -1,6 +1,6 @@
 # UMKM Marketplace Platform (Monorepo Starter)
 
-Starter workspace untuk web marketplace UMKM menggunakan **Next.js** di folder frontend dan **Golang** di backend.
+Starter workspace untuk web marketplace UMKM menggunakan **Next.js 16** di frontend dan **Golang + PostgreSQL** di backend.
 
 ---
 
@@ -8,36 +8,53 @@ Starter workspace untuk web marketplace UMKM menggunakan **Next.js** di folder f
 
 ```text
 .
-├── backend/                # Go API Server
-│   ├── cmd/api/main.go     # Entry point server (port 8080)
-│   ├── internal/api/       # Routing, Handler, CORS Middleware, & Unit Tests
-│   └── go.mod
-├── frontend/               # Next.js App Router (TypeScript, Tailwind CSS)
-│   ├── src/app/            # App Router pages & layout
+├── docker-compose.yml       # Service PostgreSQL (port 5433 -> 5432)
+├── backend/                 # Go REST API
+│   ├── cmd/api/main.go      # Server entry point (port 8080)
+│   ├── internal/
+│   │   ├── api/             # Routing, Handler, CORS Middleware, & Unit Tests
+│   │   └── database/        # Koneksi pool PostgreSQL (pgx)
+│   ├── go.mod
+│   └── .env.example
+├── frontend/                # Next.js App Router (TypeScript, Tailwind CSS)
+│   ├── src/app/             # Pages, layout, UI terhubung ke backend
 │   ├── package.json
 │   ├── pnpm-lock.yaml
 │   └── .env.local
-└── docs/                   # Spesifikasi & rencana implementasi
+└── README.md
 ```
 
 ---
 
-## 🚀 Cara Menjalankan
+## 🚀 Panduan Menjalankan Project (Untuk Teman Tim)
 
-### 1. Backend (Go)
+Hanya perlu 3 langkah agar project ini berjalan di laptop manapun (Linux, macOS, Windows):
 
+### 1. Jalankan Database PostgreSQL (via Docker)
+Pastikan Docker / Docker Desktop sudah berjalan di laptop, lalu jalankan:
+```bash
+docker compose up -d
+```
+> Database PostgreSQL otomatis aktif di port `5433` dengan database `umkm_marketplace` (bebas bentrok dengan PostgreSQL port default 5432).
+
+Untuk mematikan container database kapan saja:
+```bash
+docker compose down
+```
+
+---
+
+### 2. Jalankan Backend (Go)
 Pastikan sudah terinstall Go (v1.22+).
-
 ```bash
 cd backend
 go run cmd/api/main.go
 ```
-
-Server backend akan berjalan di: `http://localhost:8080`
-
-**Endpoint API yang tersedia:**
-- `GET /api/health` - Health check status API
-- `GET /api/products` - Data produk mock UMKM
+- Backend berjalan di: `http://localhost:8080`
+- Otomatis membaca konfigurasi dari `backend/.env` (atau fallback ke default Docker port `5433`).
+- **Endpoint Test:**
+  - `GET /api/health` — Status API & koneksi PostgreSQL (`db_status: "connected"`).
+  - `GET /api/products` — Data mock produk UMKM.
 
 **Menjalankan Unit Test Backend:**
 ```bash
@@ -47,15 +64,11 @@ go test -v ./...
 
 ---
 
-### 2. Frontend (Next.js)
-
+### 3. Jalankan Frontend (Next.js)
 Pastikan sudah terinstall Node.js (v20+) dan `pnpm` (atau `npm`).
-
 ```bash
 cd frontend
 pnpm dev
 ```
-
-Buka browser di: `http://localhost:3000`
-
-Halaman frontend akan otomatis melakukan ping ke `http://localhost:8080/api/health` dan mengambil data dari `/api/products` untuk memverifikasi integrasi.
+Buka browser di: **`http://localhost:3000`**
+Halaman frontend akan langsung mendeteksi status backend secara otomatis.

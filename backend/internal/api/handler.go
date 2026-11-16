@@ -1,10 +1,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Server holds application state and dependencies such as database connection.
+type Server struct {
+	DB *pgxpool.Pool
+}
 
 // Product represents an item for the Sentra UMKM marketplace.
 type Product struct {
@@ -173,18 +182,29 @@ var sampleProducts = []Product{
 	},
 }
 
-// HealthHandler returns API health status.
-func HealthHandler(w http.ResponseWriter, r *http.Request) {
+// HealthHandler returns API health and PostgreSQL connection status.
+func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	dbStatus := "disconnected"
+	if s.DB != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.DB.Ping(ctx); err == nil {
+			dbStatus = "connected"
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"status":  "ok",
-		"message": "Backend Sentra UMKM Marketplace API is running",
+		"status":    "ok",
+		"message":   "Backend Sentra UMKM Marketplace API is running",
+		"db_status": dbStatus,
 	})
 }
 
 // ProductsHandler returns products, supporting search, category, and sorting filters.
-func ProductsHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ProductsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method == http.MethodPost {
