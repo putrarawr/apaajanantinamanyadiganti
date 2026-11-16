@@ -6,7 +6,9 @@ build/
 bin/
 
 # Environment variables
+.env
 .env*.local
+!.env.example
 
 # Superpowers scratch
 .superpowers/

@@ -1,11 +1,20 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Product represents a mock item for the UMKM marketplace.
+// Server holds application state and dependencies such as database connection.
+type Server struct {
+	DB *pgxpool.Pool
+}
+
+// Product represents an item in the UMKM marketplace.
 type Product struct {
 	ID       string  `json:"id"`
 	Name     string  `json:"name"`
@@ -14,18 +23,29 @@ type Product struct {
 	Category string  `json:"category"`
 }
 
-// HealthHandler returns API health status.
-func HealthHandler(w http.ResponseWriter, r *http.Request) {
+// HealthHandler returns API health and PostgreSQL connection status.
+func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	dbStatus := "disconnected"
+	if s.DB != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.DB.Ping(ctx); err == nil {
+			dbStatus = "connected"
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"status":  "ok",
-		"message": "Backend UMKM Marketplace API is running",
+		"status":    "ok",
+		"message":   "Backend UMKM Marketplace API is running",
+		"db_status": dbStatus,
 	})
 }
 
 // ProductsHandler returns sample products for testing frontend integration.
-func ProductsHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ProductsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 

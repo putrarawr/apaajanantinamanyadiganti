@@ -10,7 +10,7 @@ import (
 )
 
 func TestHealthHandler(t *testing.T) {
-	router := api.NewRouter()
+	router := api.NewRouter(nil)
 
 	req, err := http.NewRequest(http.MethodGet, "/api/health", nil)
 	if err != nil {
@@ -37,10 +37,14 @@ func TestHealthHandler(t *testing.T) {
 	if res["status"] != "ok" {
 		t.Errorf("expected status ok, got %s", res["status"])
 	}
+
+	if res["db_status"] != "disconnected" {
+		t.Errorf("expected db_status disconnected when pool is nil, got %s", res["db_status"])
+	}
 }
 
 func TestProductsHandler(t *testing.T) {
-	router := api.NewRouter()
+	router := api.NewRouter(nil)
 
 	req, err := http.NewRequest(http.MethodGet, "/api/products", nil)
 	if err != nil {
@@ -70,7 +74,7 @@ func TestProductsHandler(t *testing.T) {
 }
 
 func TestCORSMiddleware(t *testing.T) {
-	router := api.NewRouter()
+	router := api.NewRouter(nil)
 
 	req, err := http.NewRequest(http.MethodOptions, "/api/health", nil)
 	if err != nil {
