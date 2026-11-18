@@ -3,6 +3,14 @@
 :root {
   --font-jakarta: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --primary-orange: #FF6801;
+  --nav-h: 7rem;
+  --category-h: 3.0625rem;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --nav-h: 4rem;
+  }
 }
 
 @theme {

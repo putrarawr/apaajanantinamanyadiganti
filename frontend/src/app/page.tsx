@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { getApiBaseUrl } from "@/lib/api";
+import SellProductModal from "@/components/sell/SellProductModal";
 
 export interface ProductItem {
   id: string;
@@ -259,15 +260,172 @@ const LOCATIONS = [
   "Cirebon",
 ];
 
+type SortBy = "relevant" | "price-low" | "price-high" | "likes";
+type ConditionFilter = "all" | "Baru" | "Like new";
+type PriceRange = "all" | "under50" | "50to150" | "above150";
+
+const SORT_OPTIONS: { id: SortBy; label: string }[] = [
+  { id: "relevant", label: "Paling Sesuai" },
+  { id: "price-low", label: "Harga: Terendah ke Tertinggi" },
+  { id: "price-high", label: "Harga: Tertinggi ke Terendah" },
+  { id: "likes", label: "Paling Banyak Disukai" },
+];
+
+const CONDITION_OPTIONS: { id: ConditionFilter; label: string }[] = [
+  { id: "all", label: "Semua Kondisi" },
+  { id: "Baru", label: "Baru" },
+  { id: "Like new", label: "Preloved Istimewa / Like new" },
+];
+
+const PRICE_OPTIONS: { id: PriceRange; label: string }[] = [
+  { id: "all", label: "Semua Harga" },
+  { id: "under50", label: "Di bawah Rp 50.000" },
+  { id: "50to150", label: "Rp 50.000 - Rp 150.000" },
+  { id: "above150", label: "Di atas Rp 150.000" },
+];
+
+type FilterValues = {
+  selectedLocation: string;
+  conditionFilter: ConditionFilter;
+  priceRange: PriceRange;
+  showOnlyLiked: boolean;
+};
+
+const DEFAULT_FILTERS: FilterValues = {
+  selectedLocation: "Semua Lokasi",
+  conditionFilter: "all",
+  priceRange: "all",
+  showOnlyLiked: false,
+};
+
+const SORT_LABELS: Record<SortBy, string> = {
+  relevant: "Paling Sesuai",
+  "price-low": "Harga Terendah",
+  "price-high": "Harga Tertinggi",
+  likes: "Paling Disukai",
+};
+
+const PRICE_CHIP_LABELS: Record<Exclude<PriceRange, "all">, string> = {
+  under50: "< Rp 50rb",
+  "50to150": "Rp 50rb - 150rb",
+  above150: "> Rp 150rb",
+};
+
+function filterProducts(
+  products: ProductItem[],
+  context: FilterValues & {
+    activeTab: string;
+    searchQuery: string;
+    sortBy: SortBy;
+    likedMap: Record<string, boolean>;
+  }
+): ProductItem[] {
+  let result = [...products];
+
+  if (context.activeTab !== "Semua Produk UMKM") {
+    result = result.filter(
+      (p) => p.category.toLowerCase() === context.activeTab.toLowerCase()
+    );
+  }
+
+  if (context.searchQuery.trim()) {
+    const q = context.searchQuery.toLowerCase();
+    result = result.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.sellerName.toLowerCase().includes(q) ||
+        p.location.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q)
+    );
+  }
+
+  if (context.selectedLocation !== "Semua Lokasi") {
+    result = result.filter(
+      (p) => p.location.toLowerCase() === context.selectedLocation.toLowerCase()
+    );
+  }
+
+  if (context.showOnlyLiked) {
+    result = result.filter((p) => context.likedMap[p.id]);
+  }
+
+  if (context.conditionFilter !== "all") {
+    result = result.filter(
+      (p) => p.condition.toLowerCase() === context.conditionFilter.toLowerCase()
+    );
+  }
+
+  if (context.priceRange === "under50") {
+    result = result.filter((p) => p.price < 50000);
+  } else if (context.priceRange === "50to150") {
+    result = result.filter((p) => p.price >= 50000 && p.price <= 150000);
+  } else if (context.priceRange === "above150") {
+    result = result.filter((p) => p.price > 150000);
+  }
+
+  if (context.sortBy === "price-low") {
+    result.sort((a, b) => a.price - b.price);
+  } else if (context.sortBy === "price-high") {
+    result.sort((a, b) => b.price - a.price);
+  } else if (context.sortBy === "likes") {
+    result.sort((a, b) => {
+      const likesA = context.likedMap[a.id] ? a.likes + 1 : a.likes;
+      const likesB = context.likedMap[b.id] ? b.likes + 1 : b.likes;
+      return likesB - likesA;
+    });
+  }
+
+  return result;
+}
+
+function FilterChip({
+  label,
+  onRemove,
+}: {
+  label: string;
+  onRemove: () => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-[#FF6801]/30 bg-[#FFF4E8] py-1 pl-2.5 pr-1 text-[11px] font-semibold text-[#C24E00]">
+      {label}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Hapus filter ${label}`}
+        className="grid h-5 w-5 place-items-center rounded-full transition-colors hover:bg-[#FF6801]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6801]/40"
+      >
+        <svg
+          className="h-2.5 w-2.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </span>
+  );
+}
+
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "S";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
 export default function Home() {
   const [products, setProducts] = useState<ProductItem[]>(DEFAULT_PRODUCTS);
   const [activeTab, setActiveTab] = useState("Semua Produk UMKM");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedLocation, setSelectedLocation] = useState("Indonesia");
-  const [sortBy, setSortBy] = useState<"relevant" | "price-low" | "price-high" | "likes">("relevant");
-  const [conditionFilter, setConditionFilter] = useState<"all" | "Baru" | "Like new">("all");
-  const [priceRange, setPriceRange] = useState<"all" | "under50" | "50to150" | "above150">("all");
-  const [saveFilter, setSaveFilter] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState("Semua Lokasi");
+  const [sortBy, setSortBy] = useState<SortBy>("relevant");
+  const [conditionFilter, setConditionFilter] = useState<ConditionFilter>("all");
+  const [priceRange, setPriceRange] = useState<PriceRange>("all");
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
   const [visibleCount, setVisibleCount] = useState(8);
 
@@ -282,6 +440,7 @@ export default function Home() {
     const savedUser = localStorage.getItem("auth_user");
     if (savedUser) {
       try {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setAuthUser(JSON.parse(savedUser));
       } catch {
         // ignore
@@ -289,8 +448,65 @@ export default function Home() {
     }
   }, []);
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
-  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
+  const [draftFilters, setDraftFilters] = useState<FilterValues>(DEFAULT_FILTERS);
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [showOnlyLiked, setShowOnlyLiked] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+  const locationButtonRef = useRef<HTMLButtonElement>(null);
+  const locationMenuRef = useRef<HTMLDivElement>(null);
+  const accountButtonRef = useRef<HTMLButtonElement>(null);
+  const sortButtonRef = useRef<HTMLButtonElement>(null);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
+  const conditionButtonRef = useRef<HTMLButtonElement>(null);
+  const conditionMenuRef = useRef<HTMLDivElement>(null);
+  const priceButtonRef = useRef<HTMLButtonElement>(null);
+  const priceMenuRef = useRef<HTMLDivElement>(null);
+  const filterTriggerRef = useRef<HTMLButtonElement>(null);
+  const filterSheetRef = useRef<HTMLDivElement>(null);
+  const filterSheetCloseRef = useRef<HTMLButtonElement>(null);
+
+  // Fokuskan item lokasi aktif saat dropdown dibuka.
+  useEffect(() => {
+    if (!isLocationDropdownOpen) return;
+    const active =
+      locationMenuRef.current?.querySelector<HTMLButtonElement>(
+        '[role="menuitemradio"][aria-checked="true"]'
+      ) ??
+      locationMenuRef.current?.querySelector<HTMLButtonElement>(
+        '[role="menuitemradio"]'
+      );
+    active?.focus();
+  }, [isLocationDropdownOpen]);
+
+  // Tutup semua dropdown/panel header saat klik di luar atau tekan Escape.
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        headerRef.current &&
+        !headerRef.current.contains(event.target as Node)
+      ) {
+        setIsLocationDropdownOpen(false);
+        setIsMobileNavOpen(false);
+        setIsAccountMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsLocationDropdownOpen(false);
+        setIsMobileNavOpen(false);
+        setIsAccountMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -302,18 +518,251 @@ export default function Home() {
     }, 3000);
   };
 
-  // Form for Sell Item Modal
-  const [sellForm, setSellForm] = useState({
-    name: "",
-    price: "",
-    category: "Batik & Kain Tenun",
-    sellerName: "",
-    location: "Yogyakarta",
-    condition: "Baru",
-    description: "",
-    imageTag: "Handmade",
-    image: "https://images.unsplash.com/photo-1590736969955-71cc94801759?auto=format&fit=crop&w=800&q=80",
-  });
+  const scrollToProducts = () => {
+    document
+      .getElementById("daftar-produk")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const likedCount = useMemo(
+    () => Object.values(likedMap).filter(Boolean).length,
+    [likedMap]
+  );
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (conditionFilter !== "all") count += 1;
+    if (priceRange !== "all") count += 1;
+    if (selectedLocation !== "Semua Lokasi") count += 1;
+    if (showOnlyLiked) count += 1;
+    return count;
+  }, [conditionFilter, priceRange, selectedLocation, showOnlyLiked]);
+
+  const clearAllFilters = () => {
+    setConditionFilter("all");
+    setPriceRange("all");
+    setSelectedLocation("Semua Lokasi");
+    setShowOnlyLiked(false);
+  };
+
+  const openFilterSheet = () => {
+    setOpenFilterMenu(null);
+    setDraftFilters({
+      selectedLocation,
+      conditionFilter,
+      priceRange,
+      showOnlyLiked,
+    });
+    setIsFilterDrawerOpen(true);
+  };
+
+  const closeFilterSheet = useCallback(() => {
+    setIsFilterDrawerOpen(false);
+    filterTriggerRef.current?.focus();
+  }, []);
+
+  const applyDraftFilters = () => {
+    setSelectedLocation(draftFilters.selectedLocation);
+    setConditionFilter(draftFilters.conditionFilter);
+    setPriceRange(draftFilters.priceRange);
+    setShowOnlyLiked(draftFilters.showOnlyLiked);
+    setVisibleCount(8);
+    closeFilterSheet();
+    scrollToProducts();
+  };
+
+  const resetToAllProducts = () => {
+    setActiveTab("Semua Produk UMKM");
+    setSearchQuery("");
+    setSelectedLocation("Semua Lokasi");
+    setConditionFilter("all");
+    setPriceRange("all");
+    setSortBy("relevant");
+    setShowOnlyLiked(false);
+  };
+
+  const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsLocationDropdownOpen(false);
+    setIsMobileNavOpen(false);
+    setIsAccountMenuOpen(false);
+    scrollToProducts();
+  };
+
+  const toggleFavorites = () => {
+    setIsMobileNavOpen(false);
+    setIsAccountMenuOpen(false);
+    if (!showOnlyLiked && likedCount === 0) {
+      showToast("Belum ada produk favorit.");
+      return;
+    }
+    setShowOnlyLiked((value) => !value);
+    scrollToProducts();
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("auth_user");
+    localStorage.removeItem("auth_store");
+    setAuthUser(null);
+    setIsAccountMenuOpen(false);
+    showToast("Berhasil keluar dari akun.");
+  };
+
+  const handleLocationMenuKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement>
+  ) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      setIsLocationDropdownOpen(false);
+      locationButtonRef.current?.focus();
+      return;
+    }
+
+    const items = Array.from(
+      locationMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitemradio"]'
+      ) ?? []
+    );
+    if (items.length === 0) return;
+
+    const currentIndex = items.indexOf(
+      document.activeElement as HTMLButtonElement
+    );
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      items[(currentIndex + 1) % items.length].focus();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      items[(currentIndex - 1 + items.length) % items.length].focus();
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      items[0].focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      items[items.length - 1].focus();
+    } else if (event.key === "Tab") {
+      setIsLocationDropdownOpen(false);
+    }
+  };
+
+  const handleFilterMenuKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement>,
+    triggerRef: React.RefObject<HTMLButtonElement | null>
+  ) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      setOpenFilterMenu(null);
+      triggerRef.current?.focus();
+      return;
+    }
+
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitemradio"]'
+      )
+    );
+    if (items.length === 0) return;
+
+    const currentIndex = items.indexOf(
+      document.activeElement as HTMLButtonElement
+    );
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      items[(currentIndex + 1) % items.length].focus();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      items[(currentIndex - 1 + items.length) % items.length].focus();
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      items[0].focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      items[items.length - 1].focus();
+    } else if (event.key === "Tab") {
+      setOpenFilterMenu(null);
+    }
+  };
+
+  // Fokuskan opsi aktif saat dropdown filter dibuka.
+  useEffect(() => {
+    if (!openFilterMenu) return;
+    const menu =
+      openFilterMenu === "sort"
+        ? sortMenuRef.current
+        : openFilterMenu === "condition"
+        ? conditionMenuRef.current
+        : priceMenuRef.current;
+    if (!menu) return;
+    const active =
+      menu.querySelector<HTMLButtonElement>(
+        '[role="menuitemradio"][aria-checked="true"]'
+      ) ?? menu.querySelector<HTMLButtonElement>('[role="menuitemradio"]');
+    active?.focus();
+  }, [openFilterMenu]);
+
+  // Kunci scroll, tangkap fokus, dan tutup panel filter dengan Escape.
+  useEffect(() => {
+    if (!isFilterDrawerOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const frame = requestAnimationFrame(() => {
+      filterSheetCloseRef.current?.focus();
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeFilterSheet();
+        return;
+      }
+      if (event.key !== "Tab" || !filterSheetRef.current) return;
+
+      const focusables = Array.from(
+        filterSheetRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hasAttribute("disabled"));
+      if (focusables.length === 0) return;
+
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isFilterDrawerOpen, closeFilterSheet]);
+
+  // Sell Item Modal State & Handlers
+  const [newProductId, setNewProductId] = useState<string | null>(null);
+
+  const openSellModal = () => {
+    setIsSellModalOpen(true);
+  };
+
+  const handleAddProduct = (newProd: ProductItem) => {
+    setProducts((prev) => [newProd, ...prev]);
+    setVisibleCount(8);
+    setNewProductId(newProd.id);
+    showToast("Produk berhasil dipasang.");
+    window.setTimeout(() => scrollToProducts(), 80);
+    window.setTimeout(() => setNewProductId(null), 6000);
+  };
 
   const apiUrl = getApiBaseUrl();
 
@@ -347,127 +796,63 @@ export default function Home() {
     setLikedMap((prev) => {
       const willBeLiked = !prev[id];
       if (willBeLiked) {
-        showToast("Ditambahkan ke daftar favorit ❤️");
+        showToast("Ditambahkan ke daftar favorit");
       }
       return { ...prev, [id]: willBeLiked };
     });
   };
 
-  const handleSellSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!sellForm.name || !sellForm.price || !sellForm.sellerName) {
-      alert("Mohon lengkapi Nama Barang, Harga, dan Nama Toko.");
-      return;
-    }
-
-    const priceNum = parseInt(sellForm.price.replace(/\D/g, ""), 10) || 0;
-    const parts = sellForm.sellerName.split(".");
-    const initials =
-      parts.length > 1
-        ? (parts[0][0] + parts[1][0]).toUpperCase()
-        : sellForm.sellerName.slice(0, 2).toUpperCase();
-
-    const newProd: ProductItem = {
-      id: String(Date.now()),
-      sellerInitials: initials,
-      sellerColor: "bg-[#FF6801]",
-      sellerName: sellForm.sellerName.toLowerCase().replace(/\s+/g, "."),
-      timeAgo: "Baru saja",
-      badge: "Asli Pengrajin",
-      badgeColor: "text-[#D97706] border-[#D97706]/30 bg-amber-50/50",
-      image: sellForm.image,
-      imageTag: sellForm.imageTag,
-      name: sellForm.name,
-      price: priceNum,
-      category: sellForm.category,
-      condition: sellForm.condition,
-      location: sellForm.location,
-      likes: 1,
-      description: sellForm.description || "Produk lokal UMKM berkualitas tinggi.",
-    };
-
-    setProducts((prev) => [newProd, ...prev]);
-    setIsSellModalOpen(false);
-    showToast("Listing baru berhasil dipublikasikan! 🎉");
-    setSellForm({
-      name: "",
-      price: "",
-      category: "Batik & Kain Tenun",
-      sellerName: "",
-      location: "Yogyakarta",
-      condition: "Baru",
-      description: "",
-      imageTag: "Handmade",
-      image: "https://images.unsplash.com/photo-1590736969955-71cc94801759?auto=format&fit=crop&w=800&q=80",
-    });
-  };
 
   // Filter & Sort Logic
-  const filteredProducts = useMemo(() => {
-    let result = [...products];
+  const filteredProducts = useMemo(
+    () =>
+      filterProducts(products, {
+        activeTab,
+        searchQuery,
+        selectedLocation,
+        conditionFilter,
+        priceRange,
+        sortBy,
+        likedMap,
+        showOnlyLiked,
+      }),
+    [
+      products,
+      activeTab,
+      searchQuery,
+      selectedLocation,
+      conditionFilter,
+      priceRange,
+      sortBy,
+      likedMap,
+      showOnlyLiked,
+    ]
+  );
 
-    // Category Filter
-    if (activeTab !== "Semua Produk UMKM") {
-      result = result.filter(
-        (p) => p.category.toLowerCase() === activeTab.toLowerCase()
-      );
-    }
-
-    // Search Query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.sellerName.toLowerCase().includes(q) ||
-          p.location.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q)
-      );
-    }
-
-    // Location Filter
-    if (selectedLocation !== "Indonesia" && selectedLocation !== "Semua Lokasi") {
-      result = result.filter(
-        (p) => p.location.toLowerCase() === selectedLocation.toLowerCase()
-      );
-    }
-
-    // Condition Filter
-    if (conditionFilter !== "all") {
-      result = result.filter(
-        (p) => p.condition.toLowerCase() === conditionFilter.toLowerCase()
-      );
-    }
-
-    // Price Filter
-    if (priceRange === "under50") {
-      result = result.filter((p) => p.price < 50000);
-    } else if (priceRange === "50to150") {
-      result = result.filter((p) => p.price >= 50000 && p.price <= 150000);
-    } else if (priceRange === "above150") {
-      result = result.filter((p) => p.price > 150000);
-    }
-
-    // Sorting
-    if (sortBy === "price-low") {
-      result.sort((a, b) => a.price - b.price);
-    } else if (sortBy === "price-high") {
-      result.sort((a, b) => b.price - a.price);
-    } else if (sortBy === "likes") {
-      result.sort((a, b) => {
-        const likesA = (likedMap[a.id] ? a.likes + 1 : a.likes);
-        const likesB = (likedMap[b.id] ? b.likes + 1 : b.likes);
-        return likesB - likesA;
-      });
-    }
-
-    return result;
-  }, [products, activeTab, searchQuery, selectedLocation, conditionFilter, priceRange, sortBy, likedMap]);
+  const draftResultCount = useMemo(() => {
+    if (!isFilterDrawerOpen) return filteredProducts.length;
+    return filterProducts(products, {
+      activeTab,
+      searchQuery,
+      ...draftFilters,
+      sortBy,
+      likedMap,
+    }).length;
+  }, [
+    isFilterDrawerOpen,
+    filteredProducts.length,
+    products,
+    activeTab,
+    searchQuery,
+    draftFilters,
+    sortBy,
+    likedMap,
+  ]);
 
   const displayedProducts = filteredProducts.slice(0, visibleCount);
 
   return (
-    <div className="min-h-screen bg-white text-[#222222] flex flex-col font-sans select-none sm:select-auto">
+    <div className="min-h-screen bg-white text-[#222222] flex flex-col font-sans">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#1A1A1A] text-white px-5 py-3 rounded-lg shadow-xl text-xs sm:text-sm font-medium flex items-center gap-2 animate-bounce">
@@ -477,165 +862,491 @@ export default function Home() {
       )}
 
       {/* 1. TOP HEADER (Vibrant Orange Sentra Bar) */}
-      <header className="bg-[#FF6801] text-white sticky top-0 z-40 shadow-sm">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-3 sm:gap-6">
-          {/* Logo & Category Button */}
-          <div className="flex items-center gap-4 sm:gap-6 shrink-0">
-            <div
-              onClick={() => {
-                setActiveTab("Semua Produk UMKM");
-                setSearchQuery("");
-                setSelectedLocation("Indonesia");
-                setConditionFilter("all");
-                setPriceRange("all");
-                setSortBy("relevant");
-              }}
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#FF6801] font-black text-xl shadow-sm">
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-40 bg-[#FF6801] text-white shadow-[0_1px_0_rgba(0,0,0,0.06),0_10px_30px_-22px_rgba(0,0,0,0.55)]"
+      >
+        <nav
+          aria-label="Navigasi utama"
+          className="mx-auto flex max-w-[1360px] flex-wrap items-center gap-x-2 gap-y-2 px-4 pb-3 pt-2 sm:h-16 sm:flex-nowrap sm:gap-4 sm:px-6 sm:py-0"
+        >
+          {/* Logo */}
+          <Link
+            href="/"
+            onClick={resetToAllProducts}
+            aria-label="SentraUMKM — beranda"
+            className="group order-1 flex shrink-0 items-center gap-2 rounded-xl pr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+          >
+            <span className="relative grid h-9 w-9 place-items-center overflow-hidden rounded-[0.7rem] bg-white shadow-sm transition-transform duration-200 group-hover:-translate-y-px sm:h-10 sm:w-10 sm:rounded-[0.8rem]">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-black/[0.05] to-transparent"
+              />
+              <span className="relative text-[1.05rem] font-black leading-none tracking-[-0.04em] text-[#FF6801] sm:text-[1.15rem]">
                 S
-              </div>
-              <span className="font-extrabold text-2xl tracking-tight text-white">
-                sentra
               </span>
-            </div>
+            </span>
+            <span className="flex flex-col leading-none">
+              <span className="text-[1.05rem] font-extrabold leading-none tracking-[-0.03em] text-white sm:text-[1.1rem]">
+                Sentra
+                <span className="hidden text-white/75 sm:inline">UMKM</span>
+              </span>
+              <span className="mt-1 hidden text-[7.5px] font-bold uppercase leading-none tracking-[0.2em] text-white/60 sm:block">
+                Pasar UMKM Indonesia
+              </span>
+            </span>
+          </Link>
 
-            <div className="relative">
+          {/* Search */}
+          <form
+            role="search"
+            onSubmit={handleSearchSubmit}
+            className="order-3 w-full min-w-0 sm:order-2 sm:w-auto sm:flex-1"
+          >
+          <div className="relative flex h-11 min-w-0 items-center rounded-full bg-white pl-3 pr-1 shadow-[0_2px_10px_-6px_rgba(0,0,0,0.45)] transition-shadow focus-within:ring-2 focus-within:ring-white/70 focus-within:ring-offset-2 focus-within:ring-offset-[#FF6801] sm:h-10">
+            <svg
+              className="h-4 w-4 shrink-0 text-[#9CA3AF]"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+            <label htmlFor="nav-search" className="sr-only">
+              Cari produk UMKM
+            </label>
+            <input
+              id="nav-search"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari kain tenun, madu hutan..."
+              enterKeyHint="search"
+              className="h-full w-full min-w-0 bg-transparent px-2.5 text-xs text-[#1E1E1E] outline-none placeholder:text-[#9CA3AF] sm:text-sm"
+            />
+
+            {searchQuery && (
               <button
-                onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-                className="hidden lg:flex items-center gap-1.5 text-sm font-semibold text-white/95 hover:text-white px-2 py-1 transition-opacity cursor-pointer"
+                type="button"
+                onClick={() => setSearchQuery("")}
+                aria-label="Hapus pencarian"
+                className="mr-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full text-[#9CA3AF] transition-colors hover:bg-[#F3F4F6] hover:text-[#4B5563]"
               >
-                <span>Semua Kategori</span>
-                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                <svg
+                  className="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              </button>
+            )}
+
+            {/* Location selector dropdown */}
+            <div className="relative hidden h-full md:block">
+              <button
+                ref={locationButtonRef}
+                type="button"
+                onClick={() => setIsLocationDropdownOpen(!isLocationDropdownOpen)}
+                aria-expanded={isLocationDropdownOpen}
+                aria-haspopup="menu"
+                aria-controls="nav-location-menu"
+                className="flex h-full items-center gap-1 border-l border-[#E5E7EB] px-3 text-xs font-medium text-[#4B5563] transition-colors hover:bg-[#FAFAFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#FF6801]/40"
+              >
+                <svg
+                  className="h-3.5 w-3.5 text-[#9CA3AF]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+                </svg>
+                <span className="max-w-[80px] truncate">{selectedLocation}</span>
+                <svg
+                  className={`h-3 w-3 text-[#9CA3AF] transition-transform ${
+                    isLocationDropdownOpen ? "rotate-180" : ""
+                  }`}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
                 </svg>
               </button>
 
-              {isCategoryDropdownOpen && (
-                <div className="absolute top-full left-0 mt-2 w-56 bg-white rounded-lg shadow-xl py-2 z-50 text-gray-800 text-xs border border-gray-100">
-                  {CATEGORY_TABS.map((cat) => (
-                    <button
-                      key={cat}
-                      onClick={() => {
-                        setActiveTab(cat);
-                        setIsCategoryDropdownOpen(false);
-                      }}
-                      className="w-full text-left px-4 py-2 hover:bg-orange-50 hover:text-[#FF6801] font-medium transition-colors"
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Search Box */}
-          <div className="flex-1 max-w-2xl">
-            <div className="relative flex items-center bg-white rounded-md shadow-sm h-10">
-              <span className="pl-3.5 pr-2 text-gray-400">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                </svg>
-              </span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari kain tenun, madu hutan, kriya anyaman..."
-                className="w-full h-full text-xs sm:text-sm text-gray-800 placeholder-gray-400 outline-none pr-3"
-              />
-
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="text-gray-400 hover:text-gray-600 px-2 text-xs"
+              {isLocationDropdownOpen && (
+                <div
+                  id="nav-location-menu"
+                  ref={locationMenuRef}
+                  role="menu"
+                  aria-label="Pilih lokasi"
+                  onKeyDown={handleLocationMenuKeyDown}
+                  className="absolute right-0 top-full z-50 mt-3 max-h-64 w-48 overflow-y-auto rounded-xl border border-[#E5E7EB] bg-white py-1.5 text-xs text-[#374151] shadow-xl"
                 >
-                  ✕
-                </button>
-              )}
-
-              {/* Location selector dropdown */}
-              <div className="relative hidden md:block h-full">
-                <button
-                  type="button"
-                  onClick={() => setIsLocationDropdownOpen(!isLocationDropdownOpen)}
-                  className="flex items-center border-l border-gray-200 px-3 text-xs text-gray-600 gap-1 shrink-0 hover:bg-gray-50 h-full"
-                >
-                  <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
-                  </svg>
-                  <span className="max-w-[80px] truncate">{selectedLocation}</span>
-                  <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-                  </svg>
-                </button>
-
-                {isLocationDropdownOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-44 bg-white rounded-lg shadow-xl py-2 z-50 text-gray-800 text-xs border border-gray-100 max-h-56 overflow-y-auto">
-                    {LOCATIONS.map((loc) => (
+                  {LOCATIONS.map((loc) => {
+                    const active = selectedLocation === loc;
+                    return (
                       <button
                         key={loc}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={active}
                         onClick={() => {
                           setSelectedLocation(loc);
                           setIsLocationDropdownOpen(false);
+                          locationButtonRef.current?.focus();
                         }}
-                        className="w-full text-left px-3 py-1.5 hover:bg-orange-50 hover:text-[#FF6801] font-medium"
+                        className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left font-medium transition-colors ${
+                          active
+                            ? "bg-[#FFF4E8] text-[#FF6801]"
+                            : "hover:bg-[#FAFAFA] hover:text-[#FF6801]"
+                        }`}
                       >
-                        {loc}
+                        <span className="truncate">{loc}</span>
+                        {active && (
+                          <svg
+                            className="h-3.5 w-3.5 shrink-0"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="m5 12.5 4.5 4.5L19 7.5" />
+                          </svg>
+                        )}
                       </button>
-                    ))}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              aria-label="Cari"
+              className="relative mx-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-[#FF6801] px-3 text-xs font-bold text-white transition-colors after:absolute after:-inset-1 after:content-[''] hover:bg-[#F25E00] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6801]/40 sm:px-4"
+            >
+              <svg
+                className="h-3.5 w-3.5 sm:hidden"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                aria-hidden="true"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+              </svg>
+              <span className="hidden sm:inline">Cari</span>
+            </button>
+          </div>
+          </form>
+
+          {/* Right Menu & CTA */}
+          <div className="order-2 ml-auto flex shrink-0 items-center gap-1 sm:order-3 sm:ml-0 sm:gap-1.5">
+            {/* Favorit (desktop) */}
+            <button
+              type="button"
+              onClick={toggleFavorites}
+              aria-pressed={showOnlyLiked}
+              aria-label={
+                showOnlyLiked
+                  ? "Tampilkan semua produk"
+                  : "Tampilkan produk favorit"
+              }
+              className={`relative hidden h-10 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold transition-colors after:absolute after:-inset-0.5 after:content-[''] sm:flex ${
+                showOnlyLiked
+                  ? "bg-white text-[#FF6801]"
+                  : "text-white/90 hover:bg-white/15"
+              }`}
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill={showOnlyLiked ? "currentColor" : "none"}
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 20.5s-7.5-4.4-7.5-9.9A4.4 4.4 0 0 1 12 7.4a4.4 4.4 0 0 1 7.5 3.2c0 5.5-7.5 9.9-7.5 9.9Z"
+                />
+              </svg>
+              {likedCount > 0 && <span>{likedCount}</span>}
+            </button>
+
+            {authUser ? (
+              <div className="relative">
+                <button
+                  ref={accountButtonRef}
+                  type="button"
+                  onClick={() => setIsAccountMenuOpen((value) => !value)}
+                  aria-expanded={isAccountMenuOpen}
+                  aria-haspopup="menu"
+                  aria-controls="nav-account-menu"
+                  className="flex h-10 items-center gap-2 rounded-full bg-white/15 pl-1 pr-2.5 ring-1 ring-inset ring-white/20 transition-colors hover:bg-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+                >
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white text-[11px] font-black text-[#FF6801]">
+                    {getInitials(authUser.name)}
+                  </span>
+                  <span className="hidden max-w-[110px] truncate text-xs font-semibold text-white sm:block">
+                    {authUser.name}
+                  </span>
+                  <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                    {authUser.role}
+                  </span>
+                </button>
+
+                {isAccountMenuOpen && (
+                  <div
+                    id="nav-account-menu"
+                    role="menu"
+                    aria-label="Menu akun"
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.stopPropagation();
+                        setIsAccountMenuOpen(false);
+                        accountButtonRef.current?.focus();
+                      }
+                    }}
+                    className="absolute right-0 top-full z-50 mt-3 w-52 overflow-hidden rounded-xl border border-[#E5E7EB] bg-white py-1.5 text-xs text-[#374151] shadow-xl"
+                  >
+                    <div className="border-b border-[#F3F4F6] px-3.5 py-2">
+                      <p className="truncate font-bold text-[#1E1E1E]">
+                        {authUser.name}
+                      </p>
+                      <p className="mt-0.5 text-[10px] uppercase tracking-wide text-[#9CA3AF]">
+                        {authUser.role}
+                      </p>
+                    </div>
+                    <Link
+                      href="/auth/login"
+                      role="menuitem"
+                      onClick={() => setIsAccountMenuOpen(false)}
+                      className="flex w-full items-center gap-2 px-3.5 py-2 text-left font-medium transition-colors hover:bg-[#FFF4E8] hover:text-[#FF6801]"
+                    >
+                      Halaman akun
+                    </Link>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={handleLogout}
+                      className="flex w-full items-center gap-2 px-3.5 py-2 text-left font-medium text-rose-600 transition-colors hover:bg-rose-50"
+                    >
+                      Keluar
+                    </button>
                   </div>
                 )}
               </div>
-
-              <button
-                type="button"
-                className="bg-[#1A1A1A] hover:bg-black text-white px-5 sm:px-6 h-full text-xs sm:text-sm font-semibold transition-colors shrink-0 rounded-r-md"
-              >
-                Cari
-              </button>
-            </div>
-          </div>
-
-          {/* Right Menu & CTA */}
-          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-            {authUser ? (
-              <Link
-                href="/auth/login"
-                className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 text-white px-3 py-1 rounded-full text-xs font-semibold transition"
-              >
-                <span>👤 {authUser.name}</span>
-                <span className="uppercase text-[10px] bg-white text-[#FF6801] px-1.5 py-0.5 rounded font-black">
-                  {authUser.role}
-                </span>
-              </Link>
             ) : (
-              <>
-                <Link
-                  href="/auth/register"
-                  className="hidden sm:inline text-xs sm:text-sm font-medium text-white hover:underline cursor-pointer"
-                >
-                  Daftar
-                </Link>
+              <div className="hidden items-center gap-1 sm:flex">
                 <Link
                   href="/auth/login"
-                  className="hidden sm:inline text-xs sm:text-sm font-medium text-white hover:underline cursor-pointer"
+                  className="inline-flex h-10 items-center rounded-full px-3 text-xs font-semibold text-white/90 transition-colors hover:bg-white/15 hover:text-white"
                 >
                   Masuk
                 </Link>
-              </>
+                <Link
+                  href="/auth/register"
+                  className="inline-flex h-10 items-center rounded-full bg-white/15 px-3 text-xs font-semibold text-white ring-1 ring-inset ring-white/25 transition-colors hover:bg-white/25"
+                >
+                  Daftar
+                </Link>
+              </div>
             )}
+
             <button
-              onClick={() => setIsSellModalOpen(true)}
-              className="flex items-center gap-1 bg-white hover:bg-gray-50 text-[#FF6801] px-3.5 sm:px-4 py-1.5 rounded text-xs sm:text-sm font-bold shadow-sm transition-colors cursor-pointer"
+              type="button"
+              onClick={() => openSellModal()}
+              className="flex h-10 items-center gap-1.5 rounded-full bg-white px-3 text-xs font-bold text-[#FF6801] shadow-[0_4px_14px_-8px_rgba(0,0,0,0.5)] transition-colors hover:bg-[#FFF4E8] sm:px-4 sm:text-[13px]"
             >
-              <span>+</span>
-              <span>+ Jual</span>
+              <svg
+                className="h-3.5 w-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.6"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span>Jual</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsMobileNavOpen((value) => !value)}
+              aria-label={isMobileNavOpen ? "Tutup menu" : "Buka menu"}
+              aria-expanded={isMobileNavOpen}
+              aria-controls="mobile-nav"
+              className="grid h-10 w-10 place-items-center rounded-full text-white ring-1 ring-inset ring-white/25 transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 lg:hidden"
+            >
+              {isMobileNavOpen ? (
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              ) : (
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 7h16M4 12h16M4 17h16" />
+                </svg>
+              )}
             </button>
           </div>
-        </div>
+
+        {/* Menu mobile */}
+        {isMobileNavOpen && (
+          <div
+            id="mobile-nav"
+            className="absolute inset-x-0 top-full border-t border-white/15 bg-[#FF6801] px-4 pb-4 pt-3 shadow-[0_18px_30px_-18px_rgba(0,0,0,0.5)] lg:hidden"
+          >
+            <p className="text-[9.5px] font-bold uppercase tracking-[0.16em] text-white/60">
+              Kategori
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {CATEGORY_TABS.map((tab) => {
+                const active = activeTab === tab;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(tab);
+                      setVisibleCount(8);
+                      setIsMobileNavOpen(false);
+                    }}
+                    aria-pressed={active}
+                    className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                      active
+                        ? "bg-white text-[#FF6801]"
+                        : "bg-white/15 text-white hover:bg-white/20"
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleFavorites}
+              aria-pressed={showOnlyLiked}
+              className={`mt-3 flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold transition-colors ${
+                showOnlyLiked
+                  ? "bg-white text-[#FF6801]"
+                  : "bg-white/15 text-white hover:bg-white/20"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill={showOnlyLiked ? "currentColor" : "none"}
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 20.5s-7.5-4.4-7.5-9.9A4.4 4.4 0 0 1 12 7.4a4.4 4.4 0 0 1 7.5 3.2c0 5.5-7.5 9.9-7.5 9.9Z"
+                  />
+                </svg>
+                {showOnlyLiked ? "Tampilkan semua produk" : "Produk favorit saya"}
+              </span>
+              <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold">
+                {likedCount}
+              </span>
+            </button>
+
+            {authUser ? (
+              <div className="mt-3 rounded-xl bg-white/15 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white text-[11px] font-black text-[#FF6801]">
+                      {getInitials(authUser.name)}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-xs font-semibold text-white">
+                        {authUser.name}
+                      </span>
+                      <span className="block text-[9.5px] uppercase tracking-wide text-white/70">
+                        {authUser.role}
+                      </span>
+                    </span>
+                  </span>
+                  <Link
+                    href="/auth/login"
+                    onClick={() => setIsMobileNavOpen(false)}
+                    className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-[#FF6801]"
+                  >
+                    Akun
+                  </Link>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleLogout();
+                    setIsMobileNavOpen(false);
+                  }}
+                  className="mt-2.5 w-full rounded-full px-3 py-1.5 text-[11px] font-semibold text-white ring-1 ring-inset ring-white/40 transition-colors hover:bg-white/15"
+                >
+                  Keluar
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <Link
+                  href="/auth/login"
+                  onClick={() => setIsMobileNavOpen(false)}
+                  className="flex h-10 items-center justify-center rounded-full text-xs font-semibold text-white ring-1 ring-inset ring-white/40 transition-colors hover:bg-white/15"
+                >
+                  Masuk
+                </Link>
+                <Link
+                  href="/auth/register"
+                  onClick={() => setIsMobileNavOpen(false)}
+                  className="flex h-10 items-center justify-center rounded-full bg-white text-xs font-bold text-[#FF6801] transition-colors hover:bg-[#FFF4E8]"
+                >
+                  Daftar
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+        </nav>
       </header>
 
       {/* 2. BREADCRUMB */}
@@ -663,8 +1374,8 @@ export default function Home() {
       </div>
 
       {/* 3. CATEGORY PILL TABS */}
-      <div className="border-b border-gray-100 bg-white sticky top-14 sm:top-16 z-30 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 py-3">
+      <div className="border-b border-gray-100 bg-white sticky top-[var(--nav-h)] z-30 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 py-2.5">
           <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
             {CATEGORY_TABS.map((tab) => {
               const active = activeTab === tab;
@@ -690,31 +1401,67 @@ export default function Home() {
       </div>
 
       {/* 4. FILTER CONTROLS BAR */}
-      <div className="border-b border-gray-100 bg-white sticky top-[105px] sm:top-[117px] z-20">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3">
-          {/* Left: Custom Dropdown Badges */}
-          <div className="flex items-center gap-2 flex-wrap text-xs">
-            {/* Sort Custom Dropdown */}
-            <div className="relative">
+      <div className="relative z-20 border-b border-gray-100 bg-white sm:sticky sm:top-[calc(var(--nav-h)+var(--category-h))]">
+        <div className="mx-auto max-w-[1360px] space-y-2 px-4 py-2.5 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* Left: kontrol filter */}
+            <div className="flex flex-wrap items-center gap-2 text-xs sm:w-auto">
+              {/* Panel filter lengkap (mobile utama, desktop pendamping) */}
               <button
+                ref={filterTriggerRef}
+                type="button"
+                onClick={openFilterSheet}
+                aria-haspopup="dialog"
+                aria-expanded={isFilterDrawerOpen}
+                className={`flex min-h-10 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6801]/40 sm:order-5 sm:min-h-0 ${
+                  activeFilterCount > 0
+                    ? "border-[#FF6801] bg-orange-50/60 text-[#FF6801]"
+                    : "border-gray-200 bg-white text-gray-800 hover:border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
+                  />
+                </svg>
+                <span className="sm:hidden">Filter</span>
+                <span className="hidden sm:inline">Semua Filter</span>
+                {activeFilterCount > 0 && (
+                  <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#FF6801] px-1 text-[10px] font-bold text-white">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Sort Custom Dropdown */}
+              <div className="relative order-2 sm:order-1">
+              <button
+                ref={sortButtonRef}
                 type="button"
                 onClick={() => setOpenFilterMenu(openFilterMenu === "sort" ? null : "sort")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors cursor-pointer ${
+                aria-expanded={openFilterMenu === "sort"}
+                aria-haspopup="menu"
+                aria-controls="filter-sort-menu"
+                aria-label={`Urutkan hasil, saat ini ${SORT_LABELS[sortBy]}`}
+                className={`flex min-h-10 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6801]/40 sm:min-h-0 ${
                   sortBy !== "relevant"
                     ? "border-[#FF6801] bg-orange-50/50 text-[#FF6801] font-semibold"
                     : "border-gray-200 hover:border-gray-300 text-gray-800 bg-white"
                 }`}
               >
                 <span>
-                  Urutan:{" "}
+                  <span className="hidden sm:inline">Urutan: </span>
                   <strong className={sortBy !== "relevant" ? "text-[#FF6801]" : "text-gray-900"}>
-                    {sortBy === "relevant"
-                      ? "Paling Sesuai"
-                      : sortBy === "price-low"
-                      ? "Harga Terendah"
-                      : sortBy === "price-high"
-                      ? "Harga Tertinggi"
-                      : "Paling Disukai"}
+                    {SORT_LABELS[sortBy]}
                   </strong>
                 </span>
                 <svg
@@ -723,6 +1470,7 @@ export default function Home() {
                   stroke="currentColor"
                   strokeWidth="2"
                   viewBox="0 0 24 24"
+                  aria-hidden="true"
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
                 </svg>
@@ -730,22 +1478,34 @@ export default function Home() {
 
               {openFilterMenu === "sort" && (
                 <>
-                  <div className="fixed inset-0 z-30" onClick={() => setOpenFilterMenu(null)} />
-                  <div className="absolute left-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-150">
+                  <div
+                    className="fixed inset-0 z-30"
+                    onClick={() => setOpenFilterMenu(null)}
+                    aria-hidden="true"
+                  />
+                  <div
+                    id="filter-sort-menu"
+                    ref={sortMenuRef}
+                    role="menu"
+                    aria-label="Urutkan hasil"
+                    onKeyDown={(event) =>
+                      handleFilterMenuKeyDown(event, sortButtonRef)
+                    }
+                    className="absolute left-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-150"
+                  >
                     <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                       Urutkan Hasil
                     </div>
-                    {[
-                      { id: "relevant", label: "Paling Sesuai" },
-                      { id: "price-low", label: "Harga: Terendah ke Tertinggi" },
-                      { id: "price-high", label: "Harga: Tertinggi ke Terendah" },
-                      { id: "likes", label: "Paling Banyak Disukai" },
-                    ].map((item) => (
+                    {SORT_OPTIONS.map((item) => (
                       <button
                         key={item.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={sortBy === item.id}
                         onClick={() => {
-                          setSortBy(item.id as any);
+                          setSortBy(item.id);
                           setOpenFilterMenu(null);
+                          sortButtonRef.current?.focus();
                         }}
                         className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-orange-50 hover:text-[#FF6801] transition-colors ${
                           sortBy === item.id ? "text-[#FF6801] font-bold bg-orange-50/50" : "text-gray-700"
@@ -761,11 +1521,16 @@ export default function Home() {
             </div>
 
             {/* Condition Custom Dropdown */}
-            <div className="relative">
+            <div className="relative order-3 hidden sm:block">
               <button
+                ref={conditionButtonRef}
                 type="button"
                 onClick={() => setOpenFilterMenu(openFilterMenu === "condition" ? null : "condition")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors cursor-pointer ${
+                aria-expanded={openFilterMenu === "condition"}
+                aria-haspopup="menu"
+                aria-controls="filter-condition-menu"
+                aria-label="Filter kondisi"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6801]/40 ${
                   conditionFilter !== "all"
                     ? "border-[#FF6801] bg-orange-50/50 text-[#FF6801] font-semibold"
                     : "border-gray-200 hover:border-gray-300 text-gray-800 bg-white"
@@ -790,21 +1555,34 @@ export default function Home() {
 
               {openFilterMenu === "condition" && (
                 <>
-                  <div className="fixed inset-0 z-30" onClick={() => setOpenFilterMenu(null)} />
-                  <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-150">
+                  <div
+                    className="fixed inset-0 z-30"
+                    onClick={() => setOpenFilterMenu(null)}
+                    aria-hidden="true"
+                  />
+                  <div
+                    id="filter-condition-menu"
+                    ref={conditionMenuRef}
+                    role="menu"
+                    aria-label="Pilih kondisi"
+                    onKeyDown={(event) =>
+                      handleFilterMenuKeyDown(event, conditionButtonRef)
+                    }
+                    className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-150"
+                  >
                     <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                       Pilih Kondisi
                     </div>
-                    {[
-                      { id: "all", label: "Semua Kondisi" },
-                      { id: "Baru", label: "Baru" },
-                      { id: "Like new", label: "Preloved Istimewa / Like new" },
-                    ].map((item) => (
+                    {CONDITION_OPTIONS.map((item) => (
                       <button
                         key={item.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={conditionFilter === item.id}
                         onClick={() => {
-                          setConditionFilter(item.id as any);
+                          setConditionFilter(item.id);
                           setOpenFilterMenu(null);
+                          conditionButtonRef.current?.focus();
                         }}
                         className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-orange-50 hover:text-[#FF6801] transition-colors ${
                           conditionFilter === item.id ? "text-[#FF6801] font-bold bg-orange-50/50" : "text-gray-700"
@@ -820,11 +1598,16 @@ export default function Home() {
             </div>
 
             {/* Price Custom Dropdown */}
-            <div className="relative">
+            <div className="relative order-4 hidden sm:block">
               <button
+                ref={priceButtonRef}
                 type="button"
                 onClick={() => setOpenFilterMenu(openFilterMenu === "price" ? null : "price")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors cursor-pointer ${
+                aria-expanded={openFilterMenu === "price"}
+                aria-haspopup="menu"
+                aria-controls="filter-price-menu"
+                aria-label="Filter harga"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6801]/40 ${
                   priceRange !== "all"
                     ? "border-[#FF6801] bg-orange-50/50 text-[#FF6801] font-semibold"
                     : "border-gray-200 hover:border-gray-300 text-gray-800 bg-white"
@@ -833,13 +1616,7 @@ export default function Home() {
                 <span>
                   Harga:{" "}
                   <strong className={priceRange !== "all" ? "text-[#FF6801]" : "text-gray-900"}>
-                    {priceRange === "all"
-                      ? "Semua"
-                      : priceRange === "under50"
-                      ? "< Rp 50rb"
-                      : priceRange === "50to150"
-                      ? "Rp 50rb - 150rb"
-                      : "> Rp 150rb"}
+                    {priceRange === "all" ? "Semua" : PRICE_CHIP_LABELS[priceRange]}
                   </strong>
                 </span>
                 <svg
@@ -855,22 +1632,34 @@ export default function Home() {
 
               {openFilterMenu === "price" && (
                 <>
-                  <div className="fixed inset-0 z-30" onClick={() => setOpenFilterMenu(null)} />
-                  <div className="absolute left-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-150">
+                  <div
+                    className="fixed inset-0 z-30"
+                    onClick={() => setOpenFilterMenu(null)}
+                    aria-hidden="true"
+                  />
+                  <div
+                    id="filter-price-menu"
+                    ref={priceMenuRef}
+                    role="menu"
+                    aria-label="Pilih rentang harga"
+                    onKeyDown={(event) =>
+                      handleFilterMenuKeyDown(event, priceButtonRef)
+                    }
+                    className="absolute left-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-150"
+                  >
                     <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                       Rentang Harga
                     </div>
-                    {[
-                      { id: "all", label: "Semua Harga" },
-                      { id: "under50", label: "Di bawah Rp 50.000" },
-                      { id: "50to150", label: "Rp 50.000 - Rp 150.000" },
-                      { id: "above150", label: "Di atas Rp 150.000" },
-                    ].map((item) => (
+                    {PRICE_OPTIONS.map((item) => (
                       <button
                         key={item.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={priceRange === item.id}
                         onClick={() => {
-                          setPriceRange(item.id as any);
+                          setPriceRange(item.id);
                           setOpenFilterMenu(null);
+                          priceButtonRef.current?.focus();
                         }}
                         className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-orange-50 hover:text-[#FF6801] transition-colors ${
                           priceRange === item.id ? "text-[#FF6801] font-bold bg-orange-50/50" : "text-gray-700"
@@ -885,71 +1674,69 @@ export default function Home() {
               )}
             </div>
 
-            {/* Filter Lainnya (Drawer trigger) */}
-            <button
-              onClick={() => setIsFilterDrawerOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-800 font-medium bg-white cursor-pointer transition-colors"
-            >
-              <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
-              </svg>
-              <span>Filter Lainnya</span>
-            </button>
+            </div>
 
-            {/* Clear / Reset Filter Button */}
-            {(conditionFilter !== "all" || priceRange !== "all" || sortBy !== "relevant" || selectedLocation !== "Indonesia") && (
+            <span className="ml-auto hidden whitespace-nowrap text-xs text-gray-500 sm:inline">
+              <strong className="font-bold text-gray-900">{filteredProducts.length}</strong>{" "}
+              produk
+            </span>
+          </div>
+
+          {/* Chip filter aktif */}
+          {activeFilterCount > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {conditionFilter !== "all" && (
+                <FilterChip
+                  label={`Kondisi: ${conditionFilter}`}
+                  onRemove={() => setConditionFilter("all")}
+                />
+              )}
+              {priceRange !== "all" && (
+                <FilterChip
+                  label={`Harga: ${PRICE_CHIP_LABELS[priceRange]}`}
+                  onRemove={() => setPriceRange("all")}
+                />
+              )}
+              {selectedLocation !== "Semua Lokasi" && (
+                <FilterChip
+                  label={`Lokasi: ${selectedLocation}`}
+                  onRemove={() => setSelectedLocation("Semua Lokasi")}
+                />
+              )}
+              {showOnlyLiked && (
+                <FilterChip
+                  label="Hanya favorit"
+                  onRemove={() => setShowOnlyLiked(false)}
+                />
+              )}
               <button
-                onClick={() => {
-                  setConditionFilter("all");
-                  setPriceRange("all");
-                  setSortBy("relevant");
-                  setSelectedLocation("Indonesia");
-                  showToast("Semua filter telah dibersihkan");
-                }}
-                className="flex items-center gap-1 text-xs text-[#FF6801] font-semibold bg-orange-50 hover:bg-orange-100 px-3 py-1.5 rounded-full transition-colors cursor-pointer"
+                type="button"
+                onClick={clearAllFilters}
+                className="text-[11px] font-semibold text-gray-500 underline-offset-2 transition-colors hover:text-[#FF6801] hover:underline"
               >
-                <span>✕</span>
-                <span>Reset Filter</span>
+                Hapus semua
               </button>
-            )}
-          </div>
-
-          {/* Right: Simpan Filter Toggle Switch */}
-          <div className="flex items-center gap-2.5 text-xs text-gray-500 pl-2">
-            <span className="hidden sm:inline text-gray-400">Menyimpan pencarian ini?</span>
-            <span className="text-gray-800 font-medium">Simpan filter</span>
-            <button
-              onClick={() => {
-                setSaveFilter(!saveFilter);
-                showToast(!saveFilter ? "Preferensi filter berhasil disimpan!" : "Penyimpanan filter dinonaktifkan");
-              }}
-              className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
-                saveFilter ? "bg-[#FF6801]" : "bg-gray-300"
-              }`}
-            >
-              <div
-                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${
-                  saveFilter ? "translate-x-4" : "translate-x-0"
-                }`}
-              />
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* 5. MAIN CONTENT & 4-COLUMN PRODUCT GRID */}
-      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main
+        id="daftar-produk"
+        className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 py-6 space-y-6 scroll-mt-[calc(var(--nav-h)+var(--category-h)+3.5rem)] sm:scroll-mt-[calc(var(--nav-h)+var(--category-h)+5.5rem)]"
+      >
         {/* Results Count Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
           <h1 className="text-base sm:text-lg font-bold text-gray-900 tracking-tight">
             {filteredProducts.length > 0 ? (
-              <>48.250+ barang kriya & produk UMKM di Indonesia</>
+              <>{filteredProducts.length} produk UMKM ditemukan</>
             ) : (
               <>Produk Tidak Ditemukan</>
             )}
           </h1>
-          <span className="text-xs text-gray-500 hidden sm:inline">
-            Menampilkan 1-{Math.min(displayedProducts.length, filteredProducts.length)} dari {filteredProducts.length} hasil
+          <span className="text-xs text-gray-500">
+            Menampilkan {displayedProducts.length} dari {filteredProducts.length} produk
           </span>
         </div>
 
@@ -1006,6 +1793,11 @@ export default function Home() {
                     {p.imageTag && (
                       <span className="absolute bottom-2.5 left-2.5 bg-black/75 text-white text-[10px] font-medium px-2 py-0.5 rounded">
                         {p.imageTag}
+                      </span>
+                    )}
+                    {p.id === newProductId && (
+                      <span className="absolute left-2.5 top-2.5 rounded-full bg-[#FF6801] px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                        Baru dipasang
                       </span>
                     )}
                   </div>
@@ -1070,7 +1862,9 @@ export default function Home() {
                 setSearchQuery("");
                 setConditionFilter("all");
                 setPriceRange("all");
-                setSelectedLocation("Indonesia");
+                setSelectedLocation("Semua Lokasi");
+                setSortBy("relevant");
+                setShowOnlyLiked(false);
               }}
               className="mt-4 px-4 py-2 bg-[#FF6801] text-white text-xs font-semibold rounded hover:bg-[#E55D00] transition-colors"
             >
@@ -1136,7 +1930,7 @@ export default function Home() {
             <button onClick={() => showToast("Panduan Komunitas Pengrajin Nusantara")} className="hover:text-white hover:underline transition-colors">
               Panduan Komunitas
             </button>
-            <button onClick={() => setIsSellModalOpen(true)} className="hover:text-white hover:underline transition-colors">
+            <button onClick={() => openSellModal()} className="hover:text-white hover:underline transition-colors">
               Tips Jual Cepat
             </button>
             <button onClick={() => showToast("Kebijakan Privasi Sentra 100% terlindungi")} className="hover:text-white hover:underline transition-colors">
@@ -1243,147 +2037,14 @@ export default function Home() {
       )}
 
       {/* MODAL: PASANG LISTING BARU (+ Jual) */}
-      {isSellModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
-          onClick={() => setIsSellModalOpen(false)}
-        >
-          <div
-            className="bg-white rounded-xl max-w-lg w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100 mb-4">
-              <h3 className="text-base font-bold text-gray-900">+ Pasang Iklan Produk UMKM</h3>
-              <button
-                onClick={() => setIsSellModalOpen(false)}
-                className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center text-xs"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleSellSubmit} className="space-y-3.5 text-xs">
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Nama Produk / Barang</label>
-                <input
-                  type="text"
-                  required
-                  value={sellForm.name}
-                  onChange={(e) => setSellForm({ ...sellForm, name: e.target.value })}
-                  placeholder="Contoh: Tas Anyaman Pandan Asli Kebumen"
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-xs outline-none focus:border-[#FF6801]"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Harga (Rp)</label>
-                  <input
-                    type="number"
-                    required
-                    value={sellForm.price}
-                    onChange={(e) => setSellForm({ ...sellForm, price: e.target.value })}
-                    placeholder="Contoh: 65000"
-                    className="w-full border border-gray-300 rounded px-3 py-2 text-xs outline-none focus:border-[#FF6801]"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Kategori</label>
-                  <select
-                    value={sellForm.category}
-                    onChange={(e) => setSellForm({ ...sellForm, category: e.target.value })}
-                    className="w-full border border-gray-300 rounded px-3 py-2 text-xs outline-none focus:border-[#FF6801] bg-white"
-                  >
-                    {CATEGORY_TABS.filter((c) => c !== "Semua Produk UMKM").map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Nama Toko / Pengrajin</label>
-                  <input
-                    type="text"
-                    required
-                    value={sellForm.sellerName}
-                    onChange={(e) => setSellForm({ ...sellForm, sellerName: e.target.value })}
-                    placeholder="Contoh: kriya.pandan.asli"
-                    className="w-full border border-gray-300 rounded px-3 py-2 text-xs outline-none focus:border-[#FF6801]"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Kota Asal</label>
-                  <input
-                    type="text"
-                    required
-                    value={sellForm.location}
-                    onChange={(e) => setSellForm({ ...sellForm, location: e.target.value })}
-                    placeholder="Contoh: Kebumen"
-                    className="w-full border border-gray-300 rounded px-3 py-2 text-xs outline-none focus:border-[#FF6801]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Kondisi</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="condition"
-                      checked={sellForm.condition === "Baru"}
-                      onChange={() => setSellForm({ ...sellForm, condition: "Baru" })}
-                      className="text-[#FF6801]"
-                    />
-                    <span>Baru</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="condition"
-                      checked={sellForm.condition === "Like new"}
-                      onChange={() => setSellForm({ ...sellForm, condition: "Like new" })}
-                      className="text-[#FF6801]"
-                    />
-                    <span>Preloved Istimewa / Like new</span>
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Deskripsi Singkat</label>
-                <textarea
-                  rows={3}
-                  value={sellForm.description}
-                  onChange={(e) => setSellForm({ ...sellForm, description: e.target.value })}
-                  placeholder="Ceritakan proses pembuatan, keunggulan bahan, dan detail ukuran..."
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-xs outline-none focus:border-[#FF6801]"
-                />
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsSellModalOpen(false)}
-                  className="px-4 py-2 rounded border border-gray-300 text-gray-600 font-semibold hover:bg-gray-50"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2 rounded bg-[#FF6801] hover:bg-[#E55D00] text-white font-bold transition-colors shadow-sm"
-                >
-                  Tayangkan Sekarang
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <SellProductModal
+        isOpen={isSellModalOpen}
+        onClose={() => setIsSellModalOpen(false)}
+        onAddProduct={handleAddProduct}
+        categories={CATEGORY_TABS.filter((c) => c !== "Semua Produk UMKM")}
+        locations={LOCATIONS.filter((l) => l !== "Semua Lokasi")}
+        authUser={authUser}
+      />
 
       {/* MODAL: DAFTAR / MASUK */}
       {isLoginModalOpen && (
@@ -1436,122 +2097,197 @@ export default function Home() {
         </div>
       )}
 
-      {/* DRAWER: FILTER LAINNYA */}
+      {/* DRAWER: SEMUA FILTER */}
       {isFilterDrawerOpen && (
         <div
-          className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs"
-          onClick={() => setIsFilterDrawerOpen(false)}
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-xs sm:items-stretch sm:justify-end"
+          onClick={closeFilterSheet}
         >
           <div
-            className="bg-white w-full max-w-md h-full p-6 shadow-2xl flex flex-col justify-between"
-            onClick={(e) => e.stopPropagation()}
+            ref={filterSheetRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="filter-sheet-title"
+            className="flex max-h-[88vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200 sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:slide-in-from-right-4"
+            onClick={(event) => event.stopPropagation()}
           >
-            <div className="space-y-6 overflow-y-auto">
-              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-                <h3 className="text-sm font-bold text-gray-900">Filter Tambahan</h3>
+            <div className="px-5 pt-3 sm:pt-5">
+              <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-gray-200 sm:hidden" />
+              <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3">
+                <div>
+                  <h3
+                    id="filter-sheet-title"
+                    className="text-sm font-bold text-gray-900"
+                  >
+                    Semua Filter
+                  </h3>
+                  <p className="mt-0.5 text-[11px] text-gray-500">
+                    {draftResultCount} produk sesuai pilihan
+                  </p>
+                </div>
                 <button
-                  onClick={() => setIsFilterDrawerOpen(false)}
-                  className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center text-xs"
+                  ref={filterSheetCloseRef}
+                  type="button"
+                  onClick={closeFilterSheet}
+                  aria-label="Tutup filter"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-gray-500 ring-1 ring-inset ring-gray-200 transition-colors hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6801]/40"
                 >
-                  ✕
+                  <svg
+                    className="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M6 6l12 12M18 6 6 18" />
+                  </svg>
                 </button>
               </div>
+            </div>
 
-              {/* Kategori Filter */}
+            <div className="flex-1 space-y-6 overflow-y-auto px-5 py-4">
+              {/* Lokasi */}
               <div>
-                <label className="text-xs font-bold text-gray-800 block mb-2">Kategori</label>
-                <div className="space-y-1.5 text-xs text-gray-600">
-                  {CATEGORY_TABS.map((cat) => (
-                    <label key={cat} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="drawerCat"
-                        checked={activeTab === cat}
-                        onChange={() => setActiveTab(cat)}
-                        className="text-[#FF6801]"
-                      />
-                      <span>{cat}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Lokasi Filter */}
-              <div>
-                <label className="text-xs font-bold text-gray-800 block mb-2">Wilayah / Kota</label>
+                <label
+                  htmlFor="filter-location"
+                  className="mb-2 block text-xs font-bold text-gray-800"
+                >
+                  Wilayah / Kota
+                </label>
                 <select
-                  value={selectedLocation}
-                  onChange={(e) => setSelectedLocation(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-xs bg-white"
+                  id="filter-location"
+                  value={draftFilters.selectedLocation}
+                  onChange={(event) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      selectedLocation: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-xs text-gray-800 focus:border-[#FF6801] focus:outline-none focus:ring-2 focus:ring-[#FF6801]/20"
                 >
                   {LOCATIONS.map((loc) => (
-                    <option key={loc} value={loc}>{loc}</option>
+                    <option key={loc} value={loc}>
+                      {loc}
+                    </option>
                   ))}
                 </select>
               </div>
 
-              {/* Rentang Harga */}
-              <div>
-                <label className="text-xs font-bold text-gray-800 block mb-2">Rentang Harga</label>
-                <div className="space-y-1.5 text-xs text-gray-600">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="drawerPrice"
-                      checked={priceRange === "all"}
-                      onChange={() => setPriceRange("all")}
-                    />
-                    <span>Semua Harga</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="drawerPrice"
-                      checked={priceRange === "under50"}
-                      onChange={() => setPriceRange("under50")}
-                    />
-                    <span>Di bawah Rp 50.000</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="drawerPrice"
-                      checked={priceRange === "50to150"}
-                      onChange={() => setPriceRange("50to150")}
-                    />
-                    <span>Rp 50.000 - Rp 150.000</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="drawerPrice"
-                      checked={priceRange === "above150"}
-                      onChange={() => setPriceRange("above150")}
-                    />
-                    <span>Di atas Rp 150.000</span>
-                  </label>
+              {/* Kondisi */}
+              <fieldset>
+                <legend className="mb-2 text-xs font-bold text-gray-800">
+                  Kondisi Produk
+                </legend>
+                <div className="space-y-2">
+                  {CONDITION_OPTIONS.map((option) => {
+                    const checked =
+                      draftFilters.conditionFilter === option.id;
+                    return (
+                      <label
+                        key={option.id}
+                        className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-xs transition-colors ${
+                          checked
+                            ? "border-[#FF6801] bg-orange-50/60 font-semibold text-[#C24E00]"
+                            : "border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                        }`}
+                      >
+                        <span>{option.label}</span>
+                        <input
+                          type="radio"
+                          name="filter-condition"
+                          value={option.id}
+                          checked={checked}
+                          onChange={() =>
+                            setDraftFilters((current) => ({
+                              ...current,
+                              conditionFilter: option.id,
+                            }))
+                          }
+                          className="h-4 w-4 accent-[#FF6801]"
+                        />
+                      </label>
+                    );
+                  })}
                 </div>
-              </div>
+              </fieldset>
+
+              {/* Harga */}
+              <fieldset>
+                <legend className="mb-2 text-xs font-bold text-gray-800">
+                  Rentang Harga
+                </legend>
+                <div className="space-y-2">
+                  {PRICE_OPTIONS.map((option) => {
+                    const checked = draftFilters.priceRange === option.id;
+                    return (
+                      <label
+                        key={option.id}
+                        className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-xs transition-colors ${
+                          checked
+                            ? "border-[#FF6801] bg-orange-50/60 font-semibold text-[#C24E00]"
+                            : "border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                        }`}
+                      >
+                        <span>{option.label}</span>
+                        <input
+                          type="radio"
+                          name="filter-price"
+                          value={option.id}
+                          checked={checked}
+                          onChange={() =>
+                            setDraftFilters((current) => ({
+                              ...current,
+                              priceRange: option.id,
+                            }))
+                          }
+                          className="h-4 w-4 accent-[#FF6801]"
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+
+              {/* Favorit */}
+              <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2.5 text-xs font-medium text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-50">
+                <span>
+                  Hanya tampilkan produk favorit
+                  {likedCount > 0 && (
+                    <span className="ml-1.5 text-[10px] font-semibold text-gray-400">
+                      ({likedCount} disukai)
+                    </span>
+                  )}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={draftFilters.showOnlyLiked}
+                  onChange={(event) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      showOnlyLiked: event.target.checked,
+                    }))
+                  }
+                  className="h-4 w-4 accent-[#FF6801]"
+                />
+              </label>
             </div>
 
-            <div className="pt-4 border-t border-gray-100 flex gap-2">
+            <div className="flex gap-2 border-t border-gray-100 px-5 py-4">
               <button
-                onClick={() => {
-                  setActiveTab("Semua Produk UMKM");
-                  setSelectedLocation("Indonesia");
-                  setPriceRange("all");
-                  setConditionFilter("all");
-                  setIsFilterDrawerOpen(false);
-                }}
-                className="flex-1 py-2.5 border border-gray-300 rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                type="button"
+                onClick={() => setDraftFilters({ ...DEFAULT_FILTERS })}
+                className="rounded-full border border-gray-300 px-4 py-3 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50"
               >
                 Reset
               </button>
               <button
-                onClick={() => setIsFilterDrawerOpen(false)}
-                className="flex-1 py-2.5 bg-[#FF6801] hover:bg-[#E55D00] text-white rounded text-xs font-bold transition-colors"
+                type="button"
+                onClick={applyDraftFilters}
+                className="flex-1 rounded-full bg-[#FF6801] px-4 py-3 text-xs font-bold text-white transition-colors hover:bg-[#F25E00]"
               >
-                Terapkan Filter
+                Tampilkan {draftResultCount} produk
               </button>
             </div>
           </div>
